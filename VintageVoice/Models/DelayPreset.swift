@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum DelayPreset: String, CaseIterable, Identifiable {
+enum DelayPreset: String, CaseIterable, Identifiable, Codable {
     case oneHour = "1h"
     case sixHours = "6h"
     case oneDay = "1d"
