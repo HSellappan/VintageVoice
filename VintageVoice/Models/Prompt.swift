@@ -17,11 +17,11 @@ enum PromptCategory: String, Codable {
 }
 
 struct Prompt: Codable, Identifiable {
-    let id: String
-    let text: String
-    let defaultDelayHours: Int
-    let category: PromptCategory
-    let seasonTag: String?       // e.g., "winter", "summer", "holiday"
+    var id: String
+    var text: String
+    var defaultDelayHours: Int
+    var category: PromptCategory
+    var seasonTag: String?       // e.g., "winter", "summer", "holiday"
     var expiresAt: Date?         // Expires 24h after creation
 
     init(

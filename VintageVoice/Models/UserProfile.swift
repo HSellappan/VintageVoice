@@ -8,7 +8,7 @@
 import Foundation
 
 struct UserProfile: Codable, Identifiable {
-    let id: String
+    var id: String
     var timezone: String
     var streakCount: Int
     var collectedStamps: [String]
