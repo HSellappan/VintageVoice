@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 
 class AuthService: ObservableObject {
     @Published var currentUser: UserProfile?
