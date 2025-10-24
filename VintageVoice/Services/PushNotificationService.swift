@@ -2,22 +2,19 @@
 //  PushNotificationService.swift
 //  VintageVoice
 //
-//  APNs and FCM push notification handling
+//  Local notification service (no Firebase Messaging)
 //
 
 import Foundation
 import UserNotifications
-import FirebaseMessaging
 
 class PushNotificationService: NSObject, ObservableObject {
-    @Published var fcmToken: String?
     @Published var notificationPermissionGranted = false
 
     static let shared = PushNotificationService()
 
     private override init() {
         super.init()
-        Messaging.messaging().delegate = self
     }
 
     // MARK: - Permission
@@ -31,36 +28,10 @@ class PushNotificationService: NSObject, ObservableObject {
                 self.notificationPermissionGranted = granted
             }
 
-            if granted {
-                await registerForRemoteNotifications()
-            }
-
             return granted
         } catch {
             print("Failed to request notification permission: \(error)")
             return false
-        }
-    }
-
-    @MainActor
-    private func registerForRemoteNotifications() {
-        UIApplication.shared.registerForRemoteNotifications()
-    }
-
-    // MARK: - Token Management
-
-    func saveFCMToken(userID: String) async {
-        guard let token = fcmToken else { return }
-
-        do {
-            // Save token to Firestore for server-side notifications
-            let db = FirebaseManager.shared.db
-            try await db.collection("users").document(userID).updateData([
-                "fcmToken": token,
-                "lastTokenUpdate": Timestamp(date: Date())
-            ])
-        } catch {
-            print("Failed to save FCM token: \(error)")
         }
     }
 
@@ -124,15 +95,6 @@ class PushNotificationService: NSObject, ObservableObject {
                 print("Failed to schedule notification: \(error)")
             }
         }
-    }
-}
-
-// MARK: - MessagingDelegate
-
-extension PushNotificationService: MessagingDelegate {
-    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
-        print("FCM token: \(fcmToken ?? "nil")")
-        self.fcmToken = fcmToken
     }
 }
 

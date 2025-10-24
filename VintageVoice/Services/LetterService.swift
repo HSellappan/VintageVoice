@@ -2,19 +2,35 @@
 //  LetterService.swift
 //  VintageVoice
 //
-//  Manages letter creation, delivery, and purge logic with Firestore
+//  Manages letter creation, delivery, and purge logic (LOCAL ONLY)
 //
 
 import Foundation
-import FirebaseFirestore
 import Combine
 
 class LetterService: ObservableObject {
     @Published var receivedLetters: [Letter] = []
     @Published var sentLetters: [Letter] = []
 
-    private let db = Firestore.firestore()
-    private var listenerRegistration: ListenerRegistration?
+    private let userDefaults = UserDefaults.standard
+    private let lettersKey = "VintageVoice_Letters"
+    private var updateTimer: Timer?
+
+    // MARK: - Local Storage
+
+    private func loadLetters() -> [Letter] {
+        guard let data = userDefaults.data(forKey: lettersKey),
+              let letters = try? JSONDecoder().decode([Letter].self, from: data) else {
+            return []
+        }
+        return letters
+    }
+
+    private func saveLetters(_ letters: [Letter]) {
+        if let data = try? JSONEncoder().encode(letters) {
+            userDefaults.set(data, forKey: lettersKey)
+        }
+    }
 
     // MARK: - Letter Creation
 
@@ -36,8 +52,9 @@ class LetterService: ObservableObject {
             status: .sent
         )
 
-        let data = try Firestore.Encoder().encode(letter)
-        try await db.collection("letters").document(letter.id).setData(data)
+        var letters = loadLetters()
+        letters.append(letter)
+        saveLetters(letters)
 
         return letter
     }
@@ -45,80 +62,73 @@ class LetterService: ObservableObject {
     // MARK: - Fetching Letters
 
     func fetchReceivedLetters(for userID: String) {
-        listenerRegistration = db.collection("letters")
-            .whereField("recipientID", isEqualTo: userID)
-            .addSnapshotListener { [weak self] snapshot, error in
-                guard let documents = snapshot?.documents else {
-                    print("Error fetching letters: \(error?.localizedDescription ?? "unknown")")
-                    return
-                }
+        // Start timer to check for delivered letters
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateReceivedLetters(for: userID)
+        }
+        // Initial fetch
+        updateReceivedLetters(for: userID)
+    }
 
-                self?.receivedLetters = documents.compactMap { doc in
-                    try? doc.data(as: Letter.self)
-                }
-                .filter { letter in
-                    // Only show letters that have been delivered (FR-HIDE-01)
-                    letter.isVisible
-                }
-                .sorted { $0.deliverAt > $1.deliverAt }
-            }
+    private func updateReceivedLetters(for userID: String) {
+        let letters = loadLetters()
+        receivedLetters = letters
+            .filter { $0.recipientID == userID && $0.isVisible }
+            .sorted { $0.deliverAt > $1.deliverAt }
     }
 
     func fetchSentLetters(for userID: String) {
-        db.collection("letters")
-            .whereField("senderID", isEqualTo: userID)
-            .addSnapshotListener { [weak self] snapshot, error in
-                guard let documents = snapshot?.documents else {
-                    print("Error fetching sent letters: \(error?.localizedDescription ?? "unknown")")
-                    return
-                }
-
-                self?.sentLetters = documents.compactMap { doc in
-                    try? doc.data(as: Letter.self)
-                }
-                .sorted { $0.createdAt > $1.createdAt }
-            }
+        let letters = loadLetters()
+        sentLetters = letters
+            .filter { $0.senderID == userID }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
-    // MARK: - Letter Delivery (called by Cloud Function - FR-ENV-02)
+    // MARK: - Letter Delivery
 
     func deliverLetter(letterID: String) async throws {
-        try await db.collection("letters").document(letterID).updateData([
-            "status": LetterStatus.delivered.rawValue
-        ])
+        var letters = loadLetters()
+        if let index = letters.firstIndex(where: { $0.id == letterID }) {
+            letters[index].status = .delivered
+            saveLetters(letters)
+        }
     }
 
     // MARK: - Letter Opening & Playback
 
     func markLetterAsOpened(letterID: String) async throws {
-        try await db.collection("letters").document(letterID).updateData([
-            "status": LetterStatus.opened.rawValue,
-            "openedAt": Timestamp(date: Date())
-        ])
+        var letters = loadLetters()
+        if let index = letters.firstIndex(where: { $0.id == letterID }) {
+            letters[index].status = .opened
+            letters[index].openedAt = Date()
+            saveLetters(letters)
+        }
     }
 
     func updatePlaybackProgress(letterID: String, progress: Double) async throws {
-        try await db.collection("letters").document(letterID).updateData([
-            "playbackProgress": progress
-        ])
+        var letters = loadLetters()
+        if let index = letters.firstIndex(where: { $0.id == letterID }) {
+            letters[index].playbackProgress = progress
+            saveLetters(letters)
+        }
     }
 
     // MARK: - Auto-Purge (FR-DEL-03)
 
     func purgeLetter(letterID: String) async throws {
-        // Mark as purged and remove audio URL
-        try await db.collection("letters").document(letterID).updateData([
-            "status": LetterStatus.purged.rawValue,
-            "audioURL": "" // Clear audio URL to trigger storage deletion
-        ])
-
-        // Note: Actual audio file deletion happens in Cloud Function or Storage service
+        var letters = loadLetters()
+        if let index = letters.firstIndex(where: { $0.id == letterID }) {
+            letters[index].status = .purged
+            letters[index].audioURL = "" // Clear audio URL
+            saveLetters(letters)
+        }
     }
 
     // MARK: - Cleanup
 
     func stopListening() {
-        listenerRegistration?.remove()
+        updateTimer?.invalidate()
+        updateTimer = nil
     }
 
     deinit {

@@ -2,12 +2,10 @@
 //  AuthService.swift
 //  VintageVoice
 //
-//  Handles user authentication and profile management
+//  Handles user authentication and profile management (LOCAL ONLY)
 //
 
 import Foundation
-import FirebaseAuth
-import FirebaseFirestore
 
 class AuthService: ObservableObject {
     @Published var currentUser: UserProfile?
@@ -15,23 +13,28 @@ class AuthService: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let auth = Auth.auth()
-    private let db = Firestore.firestore()
+    private let userDefaultsKey = "VintageVoice_CurrentUser"
+    private let userDefaults = UserDefaults.standard
 
     init() {
-        setupAuthListener()
+        loadSavedUser()
     }
 
-    // MARK: - Auth State Listener
+    // MARK: - Local Storage
 
-    private func setupAuthListener() {
-        auth.addStateDidChangeListener { [weak self] _, user in
-            if let user = user {
-                self?.loadUserProfile(uid: user.uid)
-            } else {
-                self?.currentUser = nil
-                self?.isAuthenticated = false
-            }
+    private func loadSavedUser() {
+        if let data = userDefaults.data(forKey: userDefaultsKey),
+           let user = try? JSONDecoder().decode(UserProfile.self, from: data) {
+            self.currentUser = user
+            self.isAuthenticated = true
+        }
+    }
+
+    private func saveUser(_ user: UserProfile) {
+        if let data = try? JSONEncoder().encode(user) {
+            userDefaults.set(data, forKey: userDefaultsKey)
+            self.currentUser = user
+            self.isAuthenticated = true
         }
     }
 
@@ -41,91 +44,52 @@ class AuthService: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let result = try await auth.signInAnonymously()
-            try await createUserProfile(uid: result.user.uid)
-        } catch {
-            errorMessage = "Failed to sign in: \(error.localizedDescription)"
-            throw error
-        }
+        // Create a new local user
+        let newUser = UserProfile(id: UUID().uuidString)
+        saveUser(newUser)
     }
 
     func signIn(email: String, password: String) async throws {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            try await auth.signIn(withEmail: email, password: password)
-        } catch {
-            errorMessage = "Failed to sign in: \(error.localizedDescription)"
-            throw error
-        }
+        // Simulate sign in (just create a user)
+        let user = UserProfile(id: UUID().uuidString)
+        saveUser(user)
     }
 
     func signUp(email: String, password: String) async throws {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let result = try await auth.createUser(withEmail: email, password: password)
-            try await createUserProfile(uid: result.user.uid)
-        } catch {
-            errorMessage = "Failed to sign up: \(error.localizedDescription)"
-            throw error
-        }
+        // Simulate sign up (just create a user)
+        let user = UserProfile(id: UUID().uuidString)
+        saveUser(user)
     }
 
     func signOut() throws {
-        try auth.signOut()
+        userDefaults.removeObject(forKey: userDefaultsKey)
         currentUser = nil
         isAuthenticated = false
     }
 
     // MARK: - User Profile Management
 
-    private func createUserProfile(uid: String) async throws {
-        let profile = UserProfile(id: uid)
-        let data = try Firestore.Encoder().encode(profile)
-
-        try await db.collection("users").document(uid).setData(data)
-        self.currentUser = profile
-        self.isAuthenticated = true
-    }
-
-    func loadUserProfile(uid: String) {
-        db.collection("users").document(uid).addSnapshotListener { [weak self] snapshot, error in
-            guard let data = snapshot?.data(),
-                  let profile = try? Firestore.Decoder().decode(UserProfile.self, from: data) else {
-                return
-            }
-
-            self?.currentUser = profile
-            self?.isAuthenticated = true
-        }
-    }
-
     func updateUserProfile(_ profile: UserProfile) async throws {
-        guard let uid = auth.currentUser?.uid else {
-            throw NSError(domain: "AuthService", code: -1, userInfo: [NSLocalizedDescriptionKey: "No authenticated user"])
-        }
-
-        let data = try Firestore.Encoder().encode(profile)
-        try await db.collection("users").document(uid).setData(data, merge: true)
+        saveUser(profile)
     }
 
     // MARK: - Partner Linking
 
     func linkPartner(partnerID: String) async throws {
         guard var profile = currentUser else { return }
-
         profile.partnerID = partnerID
-        try await updateUserProfile(profile)
+        saveUser(profile)
     }
 
     func unlinkPartner() async throws {
         guard var profile = currentUser else { return }
-
         profile.partnerID = nil
-        try await updateUserProfile(profile)
+        saveUser(profile)
     }
 }
