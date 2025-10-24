@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 
 class StorageService: ObservableObject {
     @Published var uploadProgress: Double = 0
